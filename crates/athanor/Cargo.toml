@@ -1,0 +1,46 @@
+[package]
+name = "athanor"
+version = "0.1.0"
+description = "An Ethereum Virtual Machine, written from first principles"
+keywords = ["ethereum", "evm", "interpreter", "blockchain"]
+categories = ["cryptography::cryptocurrencies", "emulators"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The arithmetic layer is deliberately thin: `uint` and `fixed-hash` are the
+# battle-tested parity macros, pulled in with no default features so the
+# dependency tree stays flat. The concrete U256/H160/H256 types are
+# instantiated in this crate (src/primitives.rs), which also lets us write
+# inherent impls for them.
+uint = { version = "0.9", default-features = false }
+fixed-hash = { version = "0.8", default-features = false }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+# The trie backs real state and storage roots (src/trie_root.rs). Dependency
+# direction is one-way: the EVM knows about the trie, never the reverse.
+athanor-trie = { path = "../trie" }
+
+# Precompile cryptography (src/precompile.rs). Unlike the arithmetic layer,
+# these are algorithms it would be irresponsible to hand-roll — SHA-256,
+# RIPEMD-160, secp256k1 recovery — so athanor leans on the vetted RustCrypto
+# and libsecp256k1 crates. A deliberate trade against the otherwise flat tree.
+sha2 = { version = "0.10", default-features = false }
+ripemd = { version = "0.1", default-features = false }
+secp256k1 = { version = "0.28", features = ["recovery"] }
+num-bigint = { version = "0.4", default-features = false }
+# bn256 pairing (src/precompile.rs, 0x06-0x08): the parity/openethereum curve
+# implementation. Pairing is not something to hand-roll either.
+substrate-bn = { version = "0.6", default-features = false }
+
+[dev-dependencies]
+hex = "0.4"
+serde_json = "1.0"
+proptest = "=1.4.0"
+tempfile = "=3.10.1" # pinned: newer 3.x pulls an edition2024 getrandom, unbuildable on MSRV cargo
+
+[[bench]]
+name = "throughput"
+harness = false

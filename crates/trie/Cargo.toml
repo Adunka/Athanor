@@ -1,0 +1,17 @@
+[package]
+name = "athanor-trie"
+version = "0.1.0"
+description = "A Merkle Patricia Trie: authenticated key-value state with Ethereum-compatible roots and proofs"
+keywords = ["ethereum", "merkle", "patricia", "trie", "state"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Hashing only; the trie's node encoding and structure are its own.
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+[dev-dependencies]
+hex = "0.4"
+serde_json = "1.0"

@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/athanor", "crates/trie"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Adunka/Athanor"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
