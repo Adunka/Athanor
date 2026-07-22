@@ -90,10 +90,13 @@ that are usually the last to work.
    checked against go-ethereum's own vectors for output *and* gas (106 cases in
    all). Only KZG point-eval (0x0a) remains; it needs a trusted setup, so it is
    its own milestone.
-5. **Performance work** — instruction dispatch table, code/hash caching,
-   allocation audit. The benchmark harness that gates this now exists (see
-   below); guessing at performance is how interpreters get slower, so the
-   numbers come first and the optimisation follows.
+5. **Performance — a JIT, done.** [`athanor-jit`](crates/jit) compiles the
+   arithmetic, stack and control-flow core to native code through Cranelift and
+   runs it 8.6x faster than the interpreter on a tight loop, falling back to
+   the interpreter for everything that touches the host (see below). The
+   interpreter's own dispatch table, code caching and allocation audit remain
+   open; the benchmark harness that would gate them exists, and guessing at
+   performance is how interpreters get slower, so the numbers come first.
 
 **Known simplifications**, stated so they do not read as oversights: EIP-161
 touched-account clearing is not implemented (post-Spurious-Dragon chains rarely
@@ -177,9 +180,66 @@ being exactly the hashing cost. No dispatch table, computed-goto, or unsafe
 fast paths yet — that is deliberately future work, now that there is a way to
 measure whether it helps.
 
+## The JIT
+
+The workspace's third crate, [`athanor-jit`](crates/jit), compiles bytecode to
+native code with Cranelift and runs it over the same frame the interpreter
+would have used. On a tight arithmetic loop it is **8.6x faster** — 4.0 Ggas/s
+against the interpreter's 467 Mgas/s on the build sandbox — for 0.8 ms of
+compilation, which pays for itself after roughly 440,000 gas of execution.
+
+It compiles the arithmetic, comparison, bitwise, stack and control-flow core
+and hands everything else back. The opcodes it declines are the ones that talk
+to the host — storage, calls, memory expansion — where the win is small and the
+surface for a consensus bug is not. Reaching one is not a failure: compiled
+code writes the live stack and gas back, returns the offset it stopped at, and
+an interpreter carries on from there.
+
+Three things make it more than a bytecode-shaped `match`:
+
+* **Gas is charged once per block, not once per instruction.** A block ends at
+  the first opcode the compiler cannot handle, not merely at the first jump, so
+  every instruction in one is known to execute — which is what makes it sound
+  to front-load the cost, and to collapse the per-instruction underflow and
+  overflow checks into one of each. An unaffordable block halts exceptionally
+  and forfeits its gas anyway, so charging early cannot be observed.
+* **Cranelift has no 256-bit integer.** A stack word is carried as four 64-bit
+  limbs, least significant first, which is the layout `uint` already uses, so a
+  word crosses the boundary as a copy rather than a conversion. Addition and
+  subtraction become explicit carry and borrow chains; comparison folds from
+  the low limb upward, each higher limb overriding the result below it unless
+  the two tie. This is the price of not depending on an LLVM toolchain, and it
+  is paid so that `cargo build` stays the whole story.
+* **Dynamic jumps are dispatched by binary search.** A destination is only
+  known at run time, so every `JUMP` funnels into one dispatcher that searches
+  the `JUMPDEST` set the analysis already collected — `log2(n)` compares rather
+  than a walk down a chain, which is the entire reason to know the destination
+  set at compile time.
+
+One deliberate divergence, stated so it does not read as an oversight: which
+exceptional halt fires can differ from the interpreter, because charging gas a
+block at a time reaches out-of-gas where stepping would have underflowed an
+instruction later. The EVM draws no distinction — every exceptional halt
+forfeits the frame's gas and changes no state (YP 9.4.2) — so the two engines
+are held to agreeing that the frame failed, and compared exactly on gas and
+stack whenever it did not.
+
+Correctness is not argued, it is differentially tested. Random programs drawn
+from the compiled subset are run twice, once compiled and once interpreted, and
+the two must agree on how the frame ended, on the gas left, and on the stack
+word for word. The reference is the interpreter that reproduces 19,690 of the
+19,732 official Cancun state tests, so agreement is a strong statement rather
+than a self-consistent one.
+
+```
+cargo test -p athanor-jit     # unit tests, plus differential agreement
+cargo bench -p athanor-jit    # throughput against the interpreter
+```
+
+
 ## The trie
 
-The workspace's second crate, [`athanor-trie`](crates/trie), is the Merkle
+The workspace's trie crate, [`athanor-trie`](crates/trie), is the Merkle
 Patricia Trie that will give athanor real state roots. It stands on its own:
 
 * the full node set — leaf, extension, and sixteen-way branch — with the
@@ -232,7 +292,7 @@ panic the process**. Every byte string is a program, and hostile programs are th
 normal case for a VM.
 
 ```
-cargo test          # 114 tests: units, end-to-end transactions, property fuzzing
+cargo test          # 132 tests: units, transactions, property fuzzing, JIT agreement
 cargo clippy --all-targets
 cargo fmt
 ```
@@ -250,7 +310,11 @@ cryptography crates — `sha2`, `ripemd`, `secp256k1`, `num-bigint`, and
 `substrate-bn` for the bn256 pairing — rather than hand-rolling SHA-256,
 RIPEMD-160, secp256k1 recovery, bignum modexp, or an elliptic-curve pairing,
 which is the right call for security-sensitive code. Dev-dependencies add
-`proptest` for the fuzz layer.
+`proptest` for the fuzz layer. The JIT crate is the one place that reaches for
+something large — Cranelift, for code generation — and it is isolated behind
+its own crate so the EVM core keeps the shallow tree above. `Cargo.lock` is
+committed: reproducing a build is the point of a lockfile, and CI runs
+`--locked` against it.
 
 ## License
 

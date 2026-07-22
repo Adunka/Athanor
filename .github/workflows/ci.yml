@@ -30,4 +30,9 @@ jobs:
         with:
           toolchain: "1.75"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      # --locked matters most here. Cargo 1.75 predates the MSRV-aware
+      # resolver, so left to itself it resolves to the newest semver-compatible
+      # dependency available — and some of those now ship manifests it cannot
+      # parse at all. The committed lockfile is what keeps this job resolvable,
+      # which is also why Cargo.lock is tracked rather than ignored.
+      - run: cargo test --workspace --locked

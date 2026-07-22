@@ -1,0 +1,28 @@
+[package]
+name = "athanor-jit"
+version = "0.1.0"
+description = "Cranelift-backed JIT for the athanor EVM"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+athanor = { path = "../athanor" }
+
+# Cranelift rather than LLVM. LLVM has a native i256 and would spare the limb
+# arithmetic in `translate`, but it also means a toolchain dependency at build
+# time; Cranelift is plain Rust, so `cargo build` remains the whole story for
+# anyone cloning this. The 0.104 line is the last that resolves on the 1.75
+# MSRV the rest of the workspace holds to.
+cranelift-codegen = "0.104"
+cranelift-frontend = "0.104"
+cranelift-jit = "0.104"
+cranelift-module = "0.104"
+cranelift-native = "0.104"
+
+[dev-dependencies]
+proptest = "=1.4.0"
+
+[[bench]]
+name = "speedup"
+harness = false
